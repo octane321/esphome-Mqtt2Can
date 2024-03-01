@@ -1,0 +1,18 @@
+mqtt:
+  broker: !secret mqtt_host
+  username: !secret mqtt_username
+  password: !secret mqtt_password
+  id: ${mqtt_id}
+  client_id: ${mqtt_id}
+  topic_prefix: ${prefix}/${subtopic}
+  discovery: false
+  log_topic: ${prefix}/${subtopic}/99_Info/00_Debug/00_Payload
+  birth_message:
+    topic: ${prefix}/${subtopic}/99_Info/07_MQTT_Connection
+    payload: 1
+  will_message:
+    topic: ${prefix}/${subtopic}/99_Info/07_MQTT_Connection
+    payload: 0
+  shutdown_message:
+    topic: ${prefix}/${subtopic}/99_Info/07_MQTT_Connection
+    payload: -1

@@ -1,0 +1,51 @@
+sensor:
+  #total_voltage
+  - platform: mqtt_subscribe
+    id: shunt_total_voltage #_shunt
+    name: "BMS 01_Voltage_shunt"
+    topic: PV/SmartShunt/1_Battery/0_Voltage
+    accuracy_decimals: 2
+    unit_of_measurement: V
+    state_topic: ${prefix}/${subtopic}/00_SmartShunt/01_Voltage
+
+  #current
+  - platform: mqtt_subscribe
+    id: shunt_current #_shunt
+    name: "BMS 03_Current_shunt"
+    topic: PV/SmartShunt/1_Battery/2_Current
+    unit_of_measurement: A
+    state_topic: ${prefix}/${subtopic}/00_SmartShunt/06_Current
+
+  #power
+  - platform: mqtt_subscribe
+    id: shunt_power
+    name: "BMS Power_shunt"
+    topic: PV/SmartShunt/1_Battery/3_Power
+    accuracy_decimals: 0
+    unit_of_measurement: W
+    state_topic: ${prefix}/${subtopic}/00_SmartShunt/02_Power
+
+  #state_of_charge
+  - platform: mqtt_subscribe
+    id: shunt_state_of_charge
+    name: "BMS 04_SoC_shunt"
+    topic: PV/SmartShunt/1_Battery/1_SoC
+    accuracy_decimals: 0
+    unit_of_measurement: '%'
+    state_topic: ${prefix}/${subtopic}/00_SmartShunt/07_SoC
+
+  #UART_connection_status
+  - platform: mqtt_subscribe
+    id: shunt_uart_connected
+    name: "9901 UART Connection Status Shunt"
+    topic: PV/SmartShunt/99_Info/01_UART_Connection/no
+    accuracy_decimals: 0
+    state_topic: ${prefix}/${subtopic}/00_SmartShunt/99_Info/01_UART_Connection/no
+
+  #mqtt_connection_status
+  - platform: mqtt_subscribe
+    id: shunt_mqtt_connected
+    name: "9907 MQTT Connection Status Shunt"
+    topic: PV/SmartShunt/99_Info/07_MQTT_Connection
+    accuracy_decimals: 0
+    state_topic: ${prefix}/${subtopic}/00_SmartShunt/99_Info/07_MQTT_Connection

@@ -1,0 +1,410 @@
+globals:
+  - id: can_ack_counter
+    type: int
+    restore_value: no
+    initial_value: '0'
+  - id: charge_status
+    type: std::string
+    restore_value: no
+    initial_value: '"Wait"'
+  - id: alarm_status
+    type: std::string
+    restore_value: no
+    initial_value: '"NoAlarm"'
+  - id: charging_v
+    type: float
+    restore_value: no
+    initial_value: '0.0'
+  - id: charging_a
+    type: int
+    restore_value: no
+    initial_value: '0'
+  - id: discharging_a
+    type: int
+    restore_value: no
+    initial_value: '0'
+  - id: can_msg_counter
+    type: int
+    restore_value: no
+    initial_value: '0'
+  - id: eoc
+    type: bool
+    restore_value: no
+    initial_value: "false"
+
+# +--------------------------------------+
+# | Select CAN Protocol                  |
+# +--------------------------------------+
+select:
+  - platform: template
+    name: "CAN BMS Name"
+    id: can_bms_name
+    options:
+      - "GENERAL"
+      - "PYLON"
+      - "GOODWE"
+      - "SEPLOS"
+    restore_value: true
+    initial_option: "PYLON"
+    optimistic: true
+    set_action:
+      - logger.log:
+          format: "Chosen option: %s"
+          args: ["x.c_str()"]
+    state_topic: ${prefix}/${subtopic}/91_CAN_Setup/01_CAN_BMS_Name
+    command_topic: ${prefix}/${subtopic}/91_CAN_Setup/01_CAN_BMS_Name/set           # GENERAL / PYLON / GOODWE / SEPLOS
+  - platform: template
+    name: "CAN Protocol"
+    id: can_protocol
+    options:
+      - "GENERAL"
+      - "PYLON 1.2"
+      - "PYLON +"
+      - "SMA"
+      - "VICTRON"
+    restore_value: true
+    initial_option: "PYLON +"
+    optimistic: true
+    set_action:
+      - logger.log:
+          format: "Chosen option: %s"
+          args: ["x.c_str()"]
+    state_topic: ${prefix}/${subtopic}/91_CAN_Setup/02_CAN_Protocol
+    command_topic: ${prefix}/${subtopic}/91_CAN_Setup/02_CAN_Protocol/set           # GENERAL / PYLON 1.2 / PYLON + / SMA / VICTRON
+
+
+binary_sensor:
+# +--------------------------------------+
+# | ESP binary Sensors                   |
+# +--------------------------------------+
+  - platform: template
+    name: "ESP 08_CAN_Connection"
+    id: can_bus_status
+    state_topic: ${prefix}/${subtopic}/99_Info/08_CAN_Connection
+
+sensor:
+  - platform: template
+    name: "ESP 05_Requested Charge Voltage"
+    id: requested_charge_voltage
+    unit_of_measurement: V
+    device_class: voltage
+    state_topic: ${prefix}/${subtopic}/01_Requested_Charge_Voltage
+  # +--------------------------------------+
+  # | Auto Charge Current Control          |
+  # +--------------------------------------+
+  # First, an initial charge current is calculated based upon the maximum cell voltage but only if the Auto Charge Current switch is enabled.
+  - platform: copy
+    source_id: max_cell_voltage
+    name: ${name} Initial Charge Current
+    id: auto_charge_current_initial
+    unit_of_measurement: A
+    device_class: current
+    internal: true  
+    filters:
+    - lambda: !lambda |-
+              // Variables
+              double cell_float_v = (id(float_voltage).state / id(bms${bms}_cell_count).state);
+              // Auto Charge Current function
+              if (id(can_switch_auto_charge_current).state) {
+                if (id(max_cell_voltage).state > id(cell_ovpr).state) return 0.0;
+                else return max(0.0,(- pow(${charge_a_factor_curve_end}, pow( max(0.0, ((x - cell_float_v) / (id(cell_ovpr).state - cell_float_v))),${charge_a_factor_curve_shape}))+2) * id(charging_current).state);
+              }
+              else return id(charging_current).state;
+  # Second, an exponential moving average is calculated. This will be used to smooth the transition between different initial charge current values.
+  - platform: copy
+    source_id: auto_charge_current_initial
+    name: ${name} Moving Average Charge Current
+    id:  auto_charge_current_moving_average
+    unit_of_measurement: A
+    device_class: current
+    internal: true  
+    filters:    
+    - exponential_moving_average:
+        alpha: 0.15
+        send_every: 1
+        send_first_at: 1
+  # Third, if the instantaneous initial charge current value is lower than the moving average, use that, otherwise use the moving average.
+  # This means that cell voltage spikes will be reacted to quickly, but reduced cell voltages will not, preventing oscillation of requested current.
+  - platform: copy
+    source_id: auto_charge_current_initial
+    name: "ESP 10_Charge_Current_requested"
+    id: auto_charge_current_final
+    unit_of_measurement: A
+    device_class: current
+    accuracy_decimals: 1
+    internal: false
+    filters:
+    - lambda: !lambda |-
+              return (round(min(id(auto_charge_current_moving_average).state, x) * 10) / 10);
+    state_topic: ${prefix}/${subtopic}/02_Requested_Charge_Current
+    
+  # +--------------------------------------+
+  # | Auto Discharge Current Control       |
+  # +--------------------------------------+
+  # First, an initial discharge current is calculated based upon the minimum cell voltage but only if the Auto Discharge Current switch is enabled.
+  - platform: copy
+    source_id: min_cell_voltage
+    name: ${name} Initial Discharge Current
+    id: auto_discharge_current_initial
+    unit_of_measurement: A
+    device_class: current
+    internal: true  
+    filters:
+    - lambda: !lambda |-
+              // Auto Discharge Current function
+              if (id(can_switch_auto_discharge_current).state) {
+                if (id(min_cell_voltage).state < id(cell_uvr).state) return 0.0;
+                else return max(0.0,(- pow(${discharge_a_factor_curve_end}, pow( max(0.0, ((x - ${discharge_knee_v}) / (id(cell_uvr).state - ${discharge_knee_v}))),${discharge_a_factor_curve_shape}))+2) * id(discharging_current).state);
+              }
+              else return id(discharging_current).state;
+  # Second, an exponential moving average is calculated. This will be used to smooth the transition between different initial discharge current values.
+  - platform: copy
+    source_id: auto_discharge_current_initial
+    name: ${name} Moving Average Discharge Current
+    id:  auto_discharge_current_moving_average
+    unit_of_measurement: A
+    device_class: current
+    internal: true  
+    filters:    
+    - exponential_moving_average:
+        alpha: 0.15
+        send_every: 1
+        send_first_at: 1
+  # Third, if the instantaneous initial discharge current value is lower than the moving average, use that, otherwise use the moving average.
+  # This means that cell voltage drops will be reacted to quickly, but increased cell voltages will not, preventing oscillation of requested current.
+  - platform: copy
+    source_id: auto_discharge_current_initial
+    name: "ESP 11_Disharge_Current_requested"
+    id: auto_discharge_current_final
+    unit_of_measurement: A
+    device_class: current
+    accuracy_decimals: 1
+    internal: false
+    filters:
+    - lambda: !lambda |-
+              return (round(min(id(auto_discharge_current_moving_average).state, x) * 10) / 10);
+    state_topic: ${prefix}/${subtopic}/03_Requested_Discharge_Current
+
+
+switch:
+  # +--------------------------------------+
+  # | CAN switch Components                |
+  # +--------------------------------------+
+  # CAN charging Switch
+  - platform: template
+    name: "CAN 20_Charge enabled"
+    id: can_switch_charging
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    state_topic: ${prefix}/${subtopic}/90_Charge_Setup/20_Charging_enabled
+    command_topic: ${prefix}/${subtopic}/90_Charge_Setup/20_Charging_enabled/set
+  # CAN discharging Switch
+  - platform: template
+    name: "CAN 21_Discharge enabled"
+    id: can_switch_discharging
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    state_topic: ${prefix}/${subtopic}/90_Charge_Setup/21_Discharging_enabled
+    command_topic: ${prefix}/${subtopic}/90_Charge_Setup/21_Discharging_enabled/set
+  # CAN Top Balance Override
+  - platform: template
+    name: "CAN 23_Top_Balance_Override"
+    id: can_switch_force_bulk
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    state_topic: ${prefix}/${subtopic}/90_Charge_Setup/23_Top_Balance_Override
+    command_topic: ${prefix}/${subtopic}/90_Charge_Setup/23_Top_Balance_Override/set
+  # CAN Floatmode enable
+  - platform: template
+    name: "CAN 22_Floatmode_enabled"
+    id: can_switch_float
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    state_topic: ${prefix}/${subtopic}/90_Charge_Setup/22_Floatmode_enabled
+    command_topic: ${prefix}/${subtopic}/90_Charge_Setup/22_Floatmode_enabled/set
+  # CAN Automatic Charge Current
+  - platform: template
+    name: "CAN 24_Automatic Charge Current"
+    id: can_switch_auto_charge_current
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    state_topic: ${prefix}/${subtopic}/90_Charge_Setup/24_Automatic_Charge_Current
+    command_topic: ${prefix}/${subtopic}/90_Charge_Setup/24_Automatic_Charge_Current/set
+  # CAN Automatic Discharge Current
+  - platform: template
+    name: "CAN 25_Automatic Discharge Current"
+    id: can_switch_auto_discharge_current
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    state_topic: ${prefix}/${subtopic}/90_Charge_Setup/25_Automatic_Discharge_Current
+    command_topic: ${prefix}/${subtopic}/90_Charge_Setup/25_Automatic_Discharge_Current/set
+
+text_sensor:
+  # Charge mode
+  - platform: template
+    name: "ESP 99_Battery_Charge_Mode"
+    id: charging_status
+    state_topic: ${prefix}/${subtopic}/99_Battery_Charge_Mode
+    update_interval: 60s
+
+number:
+  # +--------------------------------------+
+  # | Slider                               |
+  # +--------------------------------------+
+  - platform: template
+    name: "ESP 01_Bulk_Volt"
+    id: "bulk_voltage"
+    state_topic: ${prefix}/${subtopic}/90_Charge_Setup/01_Bulk_Voltage
+    command_topic: ${prefix}/${subtopic}/90_Charge_Setup/01_Bulk_Voltage/set
+    step: 0.1
+    min_value: 52                                                                 #52.8
+    max_value: 58                                                                 #57.6
+    restore_value: true
+    mode: box
+    initial_value: "${bulk_v}"
+    unit_of_measurement: V
+    icon: mdi:battery-charging
+    optimistic: true
+
+  # float_voltage
+  - platform: template
+    name: "ESP 03_Float_Volt"
+    id: "float_voltage"
+    state_topic: ${prefix}/${subtopic}/90_Charge_Setup/03_Float_Voltage
+    command_topic: ${prefix}/${subtopic}/90_Charge_Setup/03_Float_Voltage/set
+    step: 0.1
+    min_value: 52                                                                 #52.8
+    max_value: 58                                                                 #57.6
+    restore_value: true
+    mode: box
+    initial_value: "${float_v}"
+    unit_of_measurement: V
+    icon: mdi:battery-charging
+    optimistic: true
+
+  # rebulk voltage (old rebulk offset (obsolet))
+  - platform: template
+    name: "ESP 04_Rebulk_Volt"
+    id: "rebulk_voltage"
+    state_topic: ${prefix}/${subtopic}/90_Charge_Setup/04_Rebulk_Voltage
+    command_topic: ${prefix}/${subtopic}/90_Charge_Setup/04_Rebulk_Voltage/set
+    step: 0.1
+    min_value: 48
+    max_value: 58
+    restore_value: true
+    mode: box
+    initial_value: "${rebulk_v}"
+    unit_of_measurement: V
+    icon: mdi:sine-wave
+    optimistic: true
+
+    # +--------------------------------------+
+    # | absorption_offset                    |
+    # +--------------------------------------+
+  - platform: template
+    name: "ESP 09_Absorbtion_Offset"
+    id: "absorption_offset"
+    state_topic: ${prefix}/${subtopic}/90_Charge_Setup/09_Absorbtion_Offset
+    command_topic: ${prefix}/${subtopic}/90_Charge_Setup/09_Absorbtion_Offset/set
+    step: 0.05
+    min_value: 0
+    max_value: 0.3
+    restore_value: true
+    mode: slider
+    initial_value: 0.05
+    unit_of_measurement: V
+    icon: mdi:sine-wave
+    optimistic: true
+
+  # Charge_Current_max
+  - platform: template
+    name: "ESP 10_Charge_Current_limit BMS1"
+    id: "bms1_charging_current"
+    state_topic: ${prefix}/${subtopic}/90_Charge_Setup/10_Charge_Current_limit/bms1
+    command_topic: ${prefix}/${subtopic}/90_Charge_Setup/10_Charge_Current_limit/bms1/set
+    step: 1
+    min_value: 0
+    max_value: "${charge_a}"
+    #restore_value: true
+    mode: slider
+    initial_value: "${charge_a}"
+    unit_of_measurement: A
+    icon: mdi:current-dc
+    optimistic: true
+  # Disharge_Current_max
+  - platform: template
+    name: "ESP 11_Discharge_Current_limit BMS1"
+    id: "bms1_discharging_current"
+    state_topic: ${prefix}/${subtopic}/90_Charge_Setup/11_Discharge_Current_limit/bms1
+    command_topic: ${prefix}/${subtopic}/90_Charge_Setup/11_Discharge_Current_limit/bms1/set
+    step: 1
+    min_value: 0
+    max_value: "${discharge_a}"
+    #restore_value: true
+    mode: slider
+    initial_value: "${discharge_a}"
+    unit_of_measurement: A
+    icon: mdi:current-dc
+    optimistic: true
+
+  # Charge_Current_max
+  - platform: template
+    name: "ESP 10_Charge_Current_limit BMS2"
+    id: "bms2_charging_current"
+    state_topic: ${prefix}/${subtopic}/90_Charge_Setup/10_Charge_Current_limit/bms2
+    command_topic: ${prefix}/${subtopic}/90_Charge_Setup/10_Charge_Current_limit/bms2/set
+    step: 1
+    min_value: 0
+    max_value: "${charge_a}"
+    #restore_value: true
+    mode: slider
+    initial_value: "${charge_a}"
+    unit_of_measurement: A
+    icon: mdi:current-dc
+    optimistic: true
+  # Disharge_Current_max
+  - platform: template
+    name: "ESP 11_Discharge_Current_limit BMS2"
+    id: "bms2_discharging_current"
+    state_topic: ${prefix}/${subtopic}/90_Charge_Setup/11_Discharge_Current_limit/bms2
+    command_topic: ${prefix}/${subtopic}/90_Charge_Setup/11_Discharge_Current_limit/bms2/set
+    step: 1
+    min_value: 0
+    max_value: "${discharge_a}"
+    #restore_value: true
+    mode: slider
+    initial_value: "${discharge_a}"
+    unit_of_measurement: A
+    icon: mdi:current-dc
+    optimistic: true
+
+  # Charge_Current_max
+  - platform: template
+    name: "ESP 10_Charge_Current_limit BMS3"
+    id: "bms3_charging_current"
+    state_topic: ${prefix}/${subtopic}/90_Charge_Setup/10_Charge_Current_limit/bms3
+    command_topic: ${prefix}/${subtopic}/90_Charge_Setup/10_Charge_Current_limit/bms3/set
+    step: 1
+    min_value: 0
+    max_value: "${charge_a}"
+    #restore_value: true
+    mode: slider
+    initial_value: "${charge_a}"
+    unit_of_measurement: A
+    icon: mdi:current-dc
+    optimistic: true
+  # Disharge_Current_max
+  - platform: template
+    name: "ESP 11_Discharge_Current_limit BMS3"
+    id: "bms3_discharging_current"
+    state_topic: ${prefix}/${subtopic}/90_Charge_Setup/11_Discharge_Current_limit/bms3
+    command_topic: ${prefix}/${subtopic}/90_Charge_Setup/11_Discharge_Current_limit/bms3/set
+    step: 1
+    min_value: 0
+    max_value: "${discharge_a}"
+    #restore_value: true
+    mode: slider
+    initial_value: "${discharge_a}"
+    unit_of_measurement: A
+    icon: mdi:current-dc
+    optimistic: true
