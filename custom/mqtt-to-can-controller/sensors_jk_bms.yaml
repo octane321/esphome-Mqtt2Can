@@ -1,0 +1,532 @@
+# +--------------------------------------+
+# | JK-BMS binary Sensors                |
+# +--------------------------------------+
+binary_sensor:
+
+  #balancing state
+  - platform: template
+    name: "BMS 02_Balancing state BMS${bms}"
+    id: bms${bms}_equalizing_state
+    state_topic: ${prefix}/${subtopic}/0${bms}_JK_BMS${bms}/02_Balancing
+
+  #charging state
+  - platform: template
+    name: "BMS 03_Charge_MOS state BMS${bms}"
+    id: bms${bms}_charging_state
+    state_topic: ${prefix}/${subtopic}/0${bms}_JK_BMS${bms}/03_Charge_MOS
+
+  #discharging state
+  - platform: template
+    name: "BMS 04_Discharge_MOS state BMS${bms}"
+    id: bms${bms}_discharging_state
+    state_topic: ${prefix}/${subtopic}/0${bms}_JK_BMS${bms}/04_Discharge_MOS
+
+    # online_status:                #not needed (BLE-Status)
+    #   name: "${name} Online Status"
+
+  #adapted from switch (can not be switched via mqtt)
+  #charging switchstate
+  - platform: template
+    name: "BMS 03_Charge_MOS switchstate BMS${bms}"
+    id: bms${bms}_switch_charging
+    state_topic: ${prefix}/${subtopic}/0${bms}_JK_BMS${bms}/03_Charge_MOS/01_Switch
+
+  #discharging switchstate
+  - platform: template
+    name: "BMS 04_Discharge_MOS switchstate BMS${bms}"
+    id: bms${bms}_switch_discharging
+    state_topic: ${prefix}/${subtopic}/0${bms}_JK_BMS${bms}/04_Discharge_MOS/01_Switch
+  #balancing switchstate
+  - platform: template
+    name: "BMS 02_Balancing switchstate BMS${bms}"
+    id: bms${bms}_switch_balancing
+    state_topic: ${prefix}/${subtopic}/0${bms}_JK_BMS${bms}/02_Balancing/01_Switch
+
+# +--------------------------------------+
+# | JK-BMS Sensors                       |
+# +--------------------------------------+
+sensor:
+
+ ### adapted from number ####
+  # max_charge_current
+  - platform: mqtt_subscribe
+    name: "BMS 13_max_Charge_current BMS${bms}"
+    topic: PV/Batteries/JK_BMS${bms}/98_BMS_Setup/13_max_Charge_current
+    id: bms${bms}_max_charge_current
+    accuracy_decimals: 0
+    unit_of_measurement: A
+    state_topic: ${prefix}/${subtopic}/0${bms}_JK_BMS${bms}/98_BMS_Setup/13_max_Charge_current #old charging_current?
+    on_raw_value:
+      then:
+        - lambda: |-
+            if (x > 0) {
+              id(bms${bms}_charging_current).traits.set_max_value(x);                         // sets the sliders max value to the BMS max_charge_current
+              id(bms${bms}_charging_current).publish_state(round(x*0.95));                    // sets the sliders value to 95% of the BMS max_charge_current
+            } else {}
+    internal: True
+  # max_discharge_current
+  - platform: mqtt_subscribe
+    name: "BMS 14_max_Discharge_current BMS${bms}"
+    topic: PV/Batteries/JK_BMS${bms}/98_BMS_Setup/14_max_Discharge_current
+    id: bms${bms}_max_discharge_current
+    accuracy_decimals: 0
+    unit_of_measurement: A
+    state_topic: ${prefix}/${subtopic}/0${bms}_JK_BMS${bms}/98_BMS_Setup/14_max_Discharge_current
+    on_raw_value:
+      then:
+        - lambda: |-
+            if (x > 0) {
+              id(bms${bms}_discharging_current).traits.set_max_value(x);                         // sets the sliders max value to the BMS max_discharge_current
+              id(bms${bms}_discharging_current).publish_state(round(x*0.95));                    // sets the sliders value to 95% of the BMS max_discharge_current
+            } else {}
+    internal: True
+
+ ### adapted from sensor ####
+  #min_cell_voltage
+  - platform: mqtt_subscribe
+    id: bms${bms}_min_cell_voltage
+    name: "BMS 25_Cell_min BMS${bms}"
+    topic: PV/Batteries/JK_BMS${bms}/01_Battery/01_Voltage/25_Cell_min
+    accuracy_decimals: 3
+    unit_of_measurement: V
+    state_topic: ${prefix}/${subtopic}/0${bms}_JK_BMS${bms}/01_Battery/01_Voltage/25_Cell_min
+    on_raw_value: 
+      then:
+        - lambda: !lambda |-
+            id(auto_discharge_current_initial).publish_state(x);
+
+  #max_cell_voltage
+  - platform: mqtt_subscribe
+    id: bms${bms}_max_cell_voltage
+    name: "BMS 27_Cell_max BMS${bms}"
+    topic: PV/Batteries/JK_BMS${bms}/01_Battery/01_Voltage/27_Cell_max
+    accuracy_decimals: 3
+    unit_of_measurement: V
+    state_topic: ${prefix}/${subtopic}/0${bms}_JK_BMS${bms}/01_Battery/01_Voltage/27_Cell_max
+
+  #min_voltage_cell
+  - platform: mqtt_subscribe
+    id: bms${bms}_min_voltage_cell
+    name: "BMS 26_Cell_min_no BMS${bms}"
+    topic: PV/Batteries/JK_BMS${bms}/01_Battery/01_Voltage/26_Cell_min_no
+    accuracy_decimals: 0
+    state_topic: ${prefix}/${subtopic}/0${bms}_JK_BMS${bms}/01_Battery/01_Voltage/26_Cell_min_no
+
+  #max_voltage_cell
+  - platform: mqtt_subscribe
+    id: bms${bms}_max_voltage_cell
+    name: "BMS 28_Cell_max_no BMS${bms}"
+    topic: PV/Batteries/JK_BMS${bms}/01_Battery/01_Voltage/28_Cell_max_no
+    accuracy_decimals: 0
+    state_topic: ${prefix}/${subtopic}/0${bms}_JK_BMS${bms}/01_Battery/01_Voltage/28_Cell_max_no
+   # unneeded Cell voltages and resistance
+    #     delta_cell_voltage:
+    #       id: bms${bms}_delta_cell_voltage
+    #       name: "${name} delta cell voltage"
+    #     average_cell_voltage:
+    #       name: "${name} average cell voltage"
+    #     cell_voltage_1:
+    #       name: "${name} cell voltage 01"
+    #     cell_voltage_2:
+    #       name: "${name} cell voltage 02"
+    #     cell_voltage_3:
+    #       name: "${name} cell voltage 03"
+    #     cell_voltage_4:
+    #       name: "${name} cell voltage 04"
+    #     cell_voltage_5:
+    #       name: "${name} cell voltage 05"
+    #     cell_voltage_6:
+    #       name: "${name} cell voltage 06"
+    #     cell_voltage_7:
+    #       name: "${name} cell voltage 07"
+    #     cell_voltage_8:
+    #       name: "${name} cell voltage 08"
+    #     cell_voltage_9:
+    #       name: "${name} cell voltage 09"
+    #     cell_voltage_10:
+    #       name: "${name} cell voltage 10"
+    #     cell_voltage_11:
+    #       name: "${name} cell voltage 11"
+    #     cell_voltage_12:
+    #       name: "${name} cell voltage 12"
+    #     cell_voltage_13:
+    #       name: "${name} cell voltage 13"
+    #     cell_voltage_14:
+    #       name: "${name} cell voltage 14"
+    #     cell_voltage_15:
+    #       name: "${name} cell voltage 15"
+    #     cell_voltage_16:
+    #       name: "${name} cell voltage 16"
+    # #    cell_voltage_17:
+    # #      name: "${name} cell voltage 17"
+    # #    cell_voltage_18:
+    # #      name: "${name} cell voltage 18"
+    # #    cell_voltage_19:
+    # #      name: "${name} cell voltage 19"
+    # #    cell_voltage_20:
+    # #      name: "${name} cell voltage 20"
+    # #    cell_voltage_21:
+    # #      name: "${name} cell voltage 21"
+    # #    cell_voltage_22:
+    # #      name: "${name} cell voltage 22"
+    # #    cell_voltage_23:
+    # #      name: "${name} cell voltage 23"
+    # #    cell_voltage_24:
+    # #      name: "${name} cell voltage 24"
+    #     cell_resistance_1:
+    #       name: "${name} cell resistance 01"
+    #     cell_resistance_2:
+    #       name: "${name} cell resistance 02"
+    #     cell_resistance_3:
+    #       name: "${name} cell resistance 03"
+    #     cell_resistance_4:
+    #       name: "${name} cell resistance 04"
+    #     cell_resistance_5:
+    #       name: "${name} cell resistance 05"
+    #     cell_resistance_6:
+    #       name: "${name} cell resistance 06"
+    #     cell_resistance_7:
+    #       name: "${name} cell resistance 07"
+    #     cell_resistance_8:
+    #       name: "${name} cell resistance 08"
+    #     cell_resistance_9:
+    #       name: "${name} cell resistance 09"
+    #     cell_resistance_10:
+    #       name: "${name} cell resistance 10"
+    #     cell_resistance_11:
+    #       name: "${name} cell resistance 11"
+    #     cell_resistance_12:
+    #       name: "${name} cell resistance 12"
+    #     cell_resistance_13:
+    #       name: "${name} cell resistance 13"
+    #     cell_resistance_14:
+    #       name: "${name} cell resistance 14"
+    #     cell_resistance_15:
+    #       name: "${name} cell resistance 15"
+    #     cell_resistance_16:
+    #       name: "${name} cell resistance 16"
+    # #    cell_resistance_17:
+    # #      name: "${name} cell resistance 17"
+    # #    cell_resistance_18:
+    # #      name: "${name} cell resistance 18"
+    # #    cell_resistance_19:
+    # #      name: "${name} cell resistance 19"
+    # #    cell_resistance_20:
+    # #      name: "${name} cell resistance 20"
+    # #    cell_resistance_21:
+    # #      name: "${name} cell resistance 21"
+    # #    cell_resistance_22:
+    # #      name: "${name} cell resistance 22"
+    # #    cell_resistance_23:
+    # #      name: "${name} cell resistance 23"
+    # #    cell_resistance_24:
+    # #      name: "${name} cell resistance 24"
+
+  #total_voltage
+  - platform: mqtt_subscribe
+    id: bms${bms}_total_voltage
+    name: "BMS 01_Voltage BMS${bms}"
+    topic: PV/Batteries/JK_BMS${bms}/01_Battery/01_Voltage
+    accuracy_decimals: 2
+    unit_of_measurement: V
+    state_topic: ${prefix}/${subtopic}/0${bms}_JK_BMS${bms}/01_Battery/01_Voltage
+
+  #current
+  - platform: mqtt_subscribe
+    id: bms${bms}_current
+    name: "BMS 03_Current BMS${bms}"
+    topic: PV/Batteries/JK_BMS${bms}/01_Battery/03_Current
+    unit_of_measurement: A
+    state_topic: ${prefix}/${subtopic}/0${bms}_JK_BMS${bms}/01_Battery/03_Current
+
+  #power
+  - platform: mqtt_subscribe
+    id: bms${bms}_power
+    name: "BMS Power BMS${bms}"
+    topic: PV/Batteries/JK_BMS${bms}/01_Battery/02_Power
+    accuracy_decimals: 0
+    unit_of_measurement: W
+    state_topic: ${prefix}/${subtopic}/0${bms}_JK_BMS${bms}/01_Battery/02_Power
+
+   # unneeded (dis-)charging power
+    # charging_power
+    # charging_power:
+    #   id: bms${bms}_charging_power
+    #   name: "${name} charging power"
+    # discharging_power
+    # discharging_power:
+    #   id: bms${bms}_discharging_power
+    #   name: "${name} discharging power"
+
+  #temperature_sensor_1
+  - platform: mqtt_subscribe
+    id: bms${bms}_temperature_sensor_1
+    name: "BMS temperature 01_Cells_left BMS${bms}"
+    topic: PV/Batteries/JK_BMS${bms}/05_Temperatures/01_Cells_left
+    accuracy_decimals: 2
+    unit_of_measurement: °C
+    state_topic: ${prefix}/${subtopic}/0${bms}_JK_BMS${bms}/05_Temperatures/01_Cells_left
+  #temperature_sensor_2
+  - platform: mqtt_subscribe
+    id: bms${bms}_temperature_sensor_2
+    name: "BMS temperature 02_Cells_right BMS${bms}"
+    topic: PV/Batteries/JK_BMS${bms}/05_Temperatures/02_Cells_right
+    accuracy_decimals: 2
+    unit_of_measurement: °C
+    state_topic: ${prefix}/${subtopic}/0${bms}_JK_BMS${bms}/05_Temperatures/02_Cells_right
+  #power_tube_temperature
+  - platform: mqtt_subscribe
+    id: bms${bms}_power_tube_temperature
+    name: "BMS temperature 03_Mosfets BMS${bms}"
+    topic: PV/Batteries/JK_BMS${bms}/05_Temperatures/03_Mosfets
+    accuracy_decimals: 2
+    unit_of_measurement: °C
+    state_topic: ${prefix}/${subtopic}/0${bms}_JK_BMS${bms}/05_Temperatures/03_Mosfets
+
+  #state_of_charge
+  - platform: mqtt_subscribe
+    id: bms${bms}_state_of_charge
+    name: "BMS 04_SoC BMS${bms}"
+    topic: PV/Batteries/JK_BMS${bms}/01_Battery/04_SoC
+    accuracy_decimals: 0
+    unit_of_measurement: '%'
+    state_topic: ${prefix}/${subtopic}/0${bms}_JK_BMS${bms}/01_Battery/04_SoC
+
+  #capacity_remaining_ah
+  - platform: mqtt_subscribe
+    id: bms${bms}_capacity_remaining_ah
+    name: "BMS 12_Capacity_remaining BMS${bms}"
+    topic: PV/Batteries/JK_BMS${bms}/01_Battery/05_Capacity_remaining
+    accuracy_decimals: 0
+    unit_of_measurement: Ah
+    state_topic: ${prefix}/${subtopic}/0${bms}_JK_BMS${bms}/01_Battery/05_Capacity_remaining
+    internal: true
+
+  #battery_capacity
+  - platform: mqtt_subscribe
+    id: bms${bms}_battery_capacity
+    name: "BMS 06_Capacity_total BMS${bms}"
+    topic: PV/Batteries/JK_BMS${bms}/01_Battery/06_Capacity_total
+    accuracy_decimals: 0
+    unit_of_measurement: Ah
+    state_topic: ${prefix}/${subtopic}/0${bms}_JK_BMS${bms}/01_Battery/06_Capacity_total
+    internal: True
+
+  #charging_cycles
+  - platform: mqtt_subscribe
+    id: bms${bms}_charging_cycles
+    name: "BMS 07_Cycle_count BMS${bms}"
+    topic: PV/Batteries/JK_BMS${bms}/01_Battery/07_Cycle_count
+    accuracy_decimals: 0
+    state_topic: ${prefix}/${subtopic}/0${bms}_JK_BMS${bms}/01_Battery/07_Cycle_count
+    internal: True
+  # unneeded topics
+    # total_charging_cycle_capacity:
+      #  name: "${name} total charging cycle capacity"
+    # total_runtime:
+      #  name: "${name} total runtime"
+    # balancing_current:
+      #  name: "${name} balancing current"
+
+  #errors_bitmask
+  - platform: mqtt_subscribe
+    id: bms${bms}_errors_bitmask
+    name: "BMS 03_BMS_Alerts bitmask BMS${bms}"
+    topic: PV/Batteries/JK_BMS${bms}/99_Info/03_BMS_Alerts/bitmask
+    accuracy_decimals: 0
+    state_topic: ${prefix}/${subtopic}/0${bms}_JK_BMS${bms}/99_Info/03_BMS_Alerts/bitmask
+    internal: True
+
+  # +--------------------------------------+
+  # | Total Daily Energy                   |
+  # +--------------------------------------+              #unneeded
+    # BMS Daily Power
+    # - platform: total_daily_energy
+    #   name: "${name} Total Daily Energy"
+    #   power_id: bms${bms}_power
+    #   unit_of_measurement: 'kWh'
+    #   state_class: total_increasing
+    #   device_class: energy
+    #   accuracy_decimals: 3
+
+    # BMS Daily Charging Power
+    # - platform: total_daily_energy
+    #   name: "${name} BMS Daily Charging Power"
+    #   power_id: bms${bms}_charging_power
+    #   unit_of_measurement: 'kWh'
+    #   state_class: total_increasing
+    #   device_class: energy
+    #   accuracy_decimals: 3
+    #   filters:
+    #     # Multiplication factor from W to kW is 0.001
+    #     - multiply: 0.001
+
+    # BMS Daily Discharging Power
+    # - platform: total_daily_energy
+    #   name: "${name} BMS Daily Discharging Power"
+    #   power_id: bms${bms}_discharging_power
+    #   unit_of_measurement: 'kWh'
+    #   state_class: total_increasing
+    #   device_class: energy
+    #   accuracy_decimals: 3
+    #   filters:
+    #     # Multiplication factor from W to kW is 0.001
+    #     - multiply: 0.001 
+
+ # Adapted from number
+  #cell_count
+  - platform: mqtt_subscribe
+    id: bms${bms}_cell_count
+    name: "BMS Cell Count BMS${bms}"
+    topic: PV/Batteries/JK_BMS${bms}/98_BMS_Setup/11_cell_count
+    accuracy_decimals: 0
+    state_topic: ${prefix}/${subtopic}/0${bms}_JK_BMS${bms}/98_BMS_Setup/11_cell_count
+    internal: True
+
+  #cell_ovp
+  - platform: mqtt_subscribe
+    id: bms${bms}_cell_ovp
+    name: "BMS Cell OVP BMS${bms}"
+    topic: PV/Batteries/JK_BMS${bms}/98_BMS_Setup/21_COVP
+    accuracy_decimals: 3
+    state_topic: ${prefix}/${subtopic}/0${bms}_JK_BMS${bms}/98_BMS_Setup/21_COVP
+    internal: True
+
+  #cell_ovpr
+  - platform: mqtt_subscribe
+    id: bms${bms}_cell_ovpr
+    name: "BMS Cell OVPR BMS${bms}"
+    topic: PV/Batteries/JK_BMS${bms}/98_BMS_Setup/22_COVPR
+    accuracy_decimals: 3
+    state_topic: ${prefix}/${subtopic}/0${bms}_JK_BMS${bms}/98_BMS_Setup/22_COVPR
+    internal: True
+
+  #cell_uvr
+  - platform: mqtt_subscribe
+    id: bms${bms}_cell_uvr
+    name: "BMS Cell UVPR BMS${bms}"
+    topic: PV/Batteries/JK_BMS${bms}/98_BMS_Setup/23_CUVPR
+    accuracy_decimals: 3
+    state_topic: ${prefix}/${subtopic}/0${bms}_JK_BMS${bms}/98_BMS_Setup/23_CUVPR
+    internal: True
+
+  #ble_connection_status
+  - platform: mqtt_subscribe
+    id: bms${bms}_ble_connected
+    name: "9901 BMS BLE Connection Status BMS${bms}"
+    topic: PV/Batteries/JK_BMS${bms}/99_Info/01_BLE_Connection/no
+    accuracy_decimals: 0
+    state_topic: ${prefix}/${subtopic}/0${bms}_JK_BMS${bms}/99_Info/01_BLE_Connection/no
+
+  #mqtt_connection_status
+  - platform: mqtt_subscribe
+    id: bms${bms}_mqtt_connected
+    name: "9907 BMS MQTT Connection Status BMS${bms}"
+    topic: PV/Batteries/JK_BMS${bms}/99_Info/07_MQTT_Connection
+    accuracy_decimals: 0
+    state_topic: ${prefix}/${subtopic}/0${bms}_JK_BMS${bms}/99_Info/07_MQTT_Connection
+
+  # +--------------------------------------+
+  # | Text sensors                         |
+  # +--------------------------------------+
+text_sensor:
+  #BMS_Alerts
+  - platform: mqtt_subscribe
+    name: "BMS 03_BMS_Alerts BMS${bms}"
+    id: bms${bms}_errors_text
+    topic: PV/Batteries/JK_BMS${bms}/99_Info/03_BMS_Alerts
+    state_topic: ${prefix}/${subtopic}/0${bms}_JK_BMS${bms}/99_Info/03_BMS_Alerts
+
+  #total_runtime_formatted
+      # total_runtime_formatted:
+      #   name: "${name} total runtime formatted"
+
+ ### text sensor - switch_helper ####
+  - platform: mqtt_subscribe
+    id: bms${bms}_switch_charging_helper
+    name: "BMS 03_Charge_MOS switch helper BMS${bms}"
+    topic: PV/Batteries/JK_BMS${bms}/03_Charge_MOS/01_Switch
+    internal: true
+    on_value:
+      then:
+        - lambda: |-
+            if (x == "ON") {
+              id(bms${bms}_switch_charging).publish_state(true);   
+            } else {
+              id(bms${bms}_switch_charging).publish_state(false);
+            }
+    #state_topic: ${prefix}/${subtopic}/0${bms}_JK_BMS${bms}/03_Charge_MOS/01_Switch/helper
+  - platform: mqtt_subscribe
+    name: "BMS 04_Discharge_MOS switch helper BMS${bms}"
+    id: bms${bms}_switch_discharging_helper
+    topic: PV/Batteries/JK_BMS${bms}/04_Discharge_MOS/01_Switch
+    internal: true
+    on_value:
+      then:
+        - lambda: |-
+            if (x == "ON") {
+              id(bms${bms}_switch_discharging).publish_state(true);   
+            } else {
+              id(bms${bms}_switch_discharging).publish_state(false);
+            }
+    #state_topic: ${prefix}/${subtopic}/0${bms}_JK_BMS${bms}/04_Discharge_MOS/01_Switch/helper
+  - platform: mqtt_subscribe
+    name: "BMS 02_Balancing switch helper BMS${bms}"
+    id: bms${bms}_switch_balancing_helper
+    topic: PV/Batteries/JK_BMS${bms}/02_Balancing/01_Switch
+    internal: true
+    on_value:
+      then:
+        - lambda: |-
+            if (x == "ON") {
+              id(bms${bms}_switch_balancing).publish_state(true);   
+            } else {
+              id(bms${bms}_switch_balancing).publish_state(false);
+            }
+    #state_topic: ${prefix}/${subtopic}/0${bms}_JK_BMS${bms}/02_Balancing/01_Switch/helper
+
+ #### text sensor - state_helper ####
+  - platform: mqtt_subscribe
+    id: bms${bms}_charging_state_helper
+    name: "BMS 03_Charge_MOS state helper BMS${bms}"
+    topic: PV/Batteries/JK_BMS${bms}/03_Charge_MOS
+    internal: true
+    on_value:
+      then:
+        - lambda: |-
+            if (x == "ON") {
+              id(bms${bms}_charging_state).publish_state(true);              
+            } else {
+              id(bms${bms}_charging_state).publish_state(false);
+            }
+    #state_topic: ${prefix}/${subtopic}/0${bms}_JK_BMS${bms}/03_Charge_MOS/helper
+
+  - platform: mqtt_subscribe
+    name: "BMS 04_Discharge_MOS state helper BMS${bms}"
+    id: bms${bms}_discharging_state_helper
+    topic: PV/Batteries/JK_BMS${bms}/04_Discharge_MOS
+    internal: true
+    on_value:
+      then:
+        - lambda: |-
+            if (x == "ON") {
+              id(bms${bms}_discharging_state).publish_state(true);
+            } else {
+              id(bms${bms}_discharging_state).publish_state(false);
+            }
+    #state_topic: ${prefix}/${subtopic}/0${bms}_JK_BMS${bms}/04_Discharge_MOS/helper
+
+  - platform: mqtt_subscribe
+    name: "BMS 02_Balancing state helper BMS${bms}"
+    id: bms${bms}_balancing_state_helper
+    topic: PV/Batteries/JK_BMS${bms}/02_Balancing
+    internal: true
+    on_value:
+      then:
+        - lambda: |-
+            if (x == "ON") {
+              id(bms${bms}_equalizing_state).publish_state(true);
+            } else {
+              id(bms${bms}_equalizing_state).publish_state(false);
+            }
+    #state_topic: ${prefix}/${subtopic}/0${bms}_JK_BMS${bms}/02_Balancing/helper
