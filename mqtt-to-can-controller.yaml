@@ -37,35 +37,67 @@
 # V1.13.2 uksa007   : Send Max Temperature of T1, T2 to inverter
 # V1.13.1 uksa007   : Fix compile issues with new version of ESPhome 2023.4.0, set rebulk offset to 2.5
 
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  manual_ip:
+    static_ip: ${ip}                                                  # Set this to the IP of the ESP
+    gateway: !secret gateway                                          # Set this to the IP address of the router. Often ends with .1
+    subnet: !secret subnet                                            # The subnet of the network. 255.255.255.0 works for most home networks.
+    dns1: !secret dns1                                                # Set this to the IP address of the router. same as gateway.
+  reboot_timeout: 5min
+
+  ap:                                                                 # Enable fallback hotspot (captive portal) in case wifi connection fails
+    ssid: "${mqtt_id} Fallback Hotspot"
+    password: !secret wifi_password
+
+captive_portal:
+
+ota:
+  password: !secret ota_password
+
+mqtt:
+  broker: !secret mqtt_host
+  username: !secret mqtt_username
+  password: !secret mqtt_password
+  id: ${mqtt_id}
+  client_id: ${mqtt_id}
+  topic_prefix: ${prefix}/${subtopic}
+  discovery: false
+  log_topic: ${prefix}/${subtopic}/99_Info/00_Debug/00_Payload
+  birth_message:
+    topic: ${prefix}/${subtopic}/99_Info/07_MQTT_Connection
+    payload: 1
+  will_message:
+    topic: ${prefix}/${subtopic}/99_Info/07_MQTT_Connection
+    payload: 0
+  shutdown_message:
+    topic: ${prefix}/${subtopic}/99_Info/07_MQTT_Connection
+    payload: -1
 
 packages:
-  # INCLUDE basics
-  esp_basics: !include            common/esp_basics.yaml
-  wifi: !include                  common/wifi.yaml
-  mqtt: !include                  common/mqtt.yaml
-
   # INCLUDE logic part
   logic: !include                 custom/mqtt-to-can-controller/logic.yaml
   # INCLUDE device SmartShunt
   sensors_shunt: !include         custom/mqtt-to-can-controller/sensors_shunt.yaml
   # INCLUDE some global sensors
   sensors_global: !include        
-    file:                       custom/mqtt-to-can-controller/sensors_global.yaml
+    file:                         custom/mqtt-to-can-controller/sensors_global.yaml
     vars:
       bms: '1'                                                                                              # the the number of cells from selected bms will be used to determine "Auto Charge Current Control"
   # INCLUDE BMS devices
   bms1_sensors: !include
-    file:                      custom/mqtt-to-can-controller/sensors_jk_bms.yaml
+    file:                         custom/mqtt-to-can-controller/sensors_jk_bms.yaml
     vars:
-      bms:                      '1'
+      bms:                        '1'
   bms2_sensors: !include
-    file:                      custom/mqtt-to-can-controller/sensors_jk_bms.yaml
+    file:                         custom/mqtt-to-can-controller/sensors_jk_bms.yaml
     vars:
-      bms:                      '2'
+      bms:                        '2'
   bms3_sensors: !include
-    file:                      custom/mqtt-to-can-controller/sensors_jk_bms.yaml
+    file:                         custom/mqtt-to-can-controller/sensors_jk_bms.yaml
     vars:
-      bms:                      '3'
+      bms:                        '3'
 
   # INCLUDE logic to combine all BMS data into one virtual "bms0"
   sensors_combine: !include
@@ -178,7 +210,11 @@ esphome:
   on_boot:
     priority: -100
     then:
-  #   create command topics for Charge_Setup
+ # create command topics for ESP
+      - mqtt.publish:
+          topic: ${prefix}/${subtopic}/97_Buttons/99_ESP_restart
+          payload: "PRESS "
+ #   create command topics for Charge_Setup
       - mqtt.publish:
           topic: ${prefix}/${subtopic}/90_Charge_Setup/01_Bulk_Voltage/set
           payload: " "
@@ -234,6 +270,9 @@ esp32:
 logger:
   level: WARN
 
+debug:
+  update_interval: 5s
+
 web_server:
   port: 80
   log: false
@@ -275,3 +314,102 @@ canbus: # 0x305 - Inverter ACK - SMA/LG/Pylon/Goodwe reply
             id(can_bus_status).publish_state(true);               // Set CANBUS Status to ON
 
             ESP_LOGI("main", "received can id: 0x305 ACK");
+
+button:
+ # ESP restart button
+  - platform: restart
+    name: "9799 restart ESP"
+    id: "restart_ESP"
+    state_topic: ${prefix}/${subtopic}/97_Buttons/99_ESP_restart
+    command_topic: ${prefix}/${subtopic}/97_Buttons/99_ESP_restart
+
+sensor:
+ # ESP Uptime sensor
+  - platform: uptime
+    name: "9904 ESP Uptime (s)"
+    id: uptime_sensor
+    update_interval: 10s
+    state_topic: ${prefix}/${subtopic}/99_Info/04_ESP_Uptime/seconds
+    on_raw_value:
+      then:
+        - text_sensor.template.publish:
+            id: uptime_human
+            state: !lambda |-
+              int seconds = round(id(uptime_sensor).raw_state);
+              int days = seconds / (24 * 3600);
+              seconds = seconds % (24 * 3600);
+              int hours = seconds / 3600;
+              seconds = seconds % 3600;
+              int minutes = seconds /  60;
+              seconds = seconds % 60;
+              return (
+                (days ? to_string(days) + "d " : "") +
+                (hours ? to_string(hours) + "h " : "") +
+                (minutes ? to_string(minutes) + "m " : "") +
+                (to_string(seconds) + "s")
+              ).c_str();
+
+ # WiFi Signal db sensor
+  - platform: wifi_signal
+    name: "9903 ESP WiFi Signal dBm"
+    id: wifi_signal_db
+    update_interval: 10s
+    state_topic: ${prefix}/${subtopic}/99_Info/03_WiFi_Signal/db
+
+ # WiFi Signal % sensor
+  - platform: copy
+    source_id: wifi_signal_db
+    name: "9903 ESP WiFi Signal %"
+    filters:
+    - delta: 5
+    - lambda: return min(max(2 * (x + 100.0), 0.0), 100.0);
+    unit_of_measurement: "Signal %"
+    state_topic: ${prefix}/${subtopic}/99_Info/03_WiFi_Signal
+
+ # ESP debug sensor
+  - platform: debug
+    free:
+      name: "990001 free Heap"
+      filters:
+        - multiply: 0.001024
+        #- delta: 5
+      accuracy_decimals: 3
+      unit_of_measurement: "kB"
+      state_topic: ${prefix}/${subtopic}/99_Info/00_Debug/01_free_Heap
+    block:
+      name: "990002 Largest contiuous free RAM Block"
+      filters:
+        - multiply: 0.001024
+        - delta: 50
+      accuracy_decimals: 3
+      unit_of_measurement: "kB"
+      state_topic: ${prefix}/${subtopic}/99_Info/00_Debug/02_Largest_free_Block
+    loop_time:
+      name: "990004 Loop Time"
+      filters:
+        - delta: 5
+      unit_of_measurement: "ms"
+      state_topic: ${prefix}/${subtopic}/99_Info/00_Debug/04_Loop_Time
+
+text_sensor:
+ # Wifi text_sensor
+  - platform: wifi_info
+    ip_address:
+      name: "9909 ESP IP Address"
+      state_topic: ${prefix}/${subtopic}/99_Info/09_IP_Address
+      update_interval: 300s
+
+ # ESP Uptime text_sensor
+  - platform: template
+    name: "9904 ESP Uptime"
+    id: uptime_human
+    state_topic: ${prefix}/${subtopic}/99_Info/04_ESP_Uptime
+
+ # DEBUG text_sensor
+  - platform: debug
+    device:
+      name: "990005 Device Info"
+      state_topic: ${prefix}/${subtopic}/99_Info/00_Debug/05_Device_Info
+    reset_reason:
+      name: "990006 Reset Reason"
+      state_topic: ${prefix}/${subtopic}/99_Info/00_Debug/06_Reset_Reason
