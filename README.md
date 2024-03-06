@@ -12,7 +12,8 @@ Please see the original Repo for any questions regarding other topics than multi
 **Please note:**
 
 The subfolders and files must be placed in your main esphome folder (where the mqtt-to-can-controller.yaml is.
-* Like this:
+
+Like this:
 ```
 /mqtt-to-can-controller.yaml
 /custom/mqtt-to-can-controller/logic.yaml
